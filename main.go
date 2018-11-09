@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -17,7 +16,7 @@ import (
 	"github.com/chain/txvm/errors"
 	"github.com/chain/txvm/protocol"
 	"github.com/chain/txvm/protocol/bc"
-	"github.com/chain/txvm/protocol/txvm"
+	"github.com/golang/protobuf/proto"
 )
 
 var (
@@ -27,7 +26,10 @@ var (
 
 var blockInterval = 5 * time.Second
 
-var chain *protocol.Chain
+var (
+	initialBlock *bc.Block
+	chain        *protocol.Chain
+)
 
 func main() {
 	ctx := context.Background()
@@ -45,7 +47,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	initialBlock, err := bs.GetBlock(ctx, 1)
+	initialBlock, err = bs.GetBlock(ctx, 1)
 	if os.IsNotExist(errors.Root(err)) {
 		initialBlock, err = protocol.NewInitialBlock(nil, 0, time.Now())
 		if err != nil {
@@ -64,6 +66,9 @@ func main() {
 		log.Fatal(err)
 	}
 
+	initialBlockID := initialBlock.Hash()
+	log.Printf("listening on %s, initial block ID %x", *addr, initialBlockID.Bytes())
+
 	http.HandleFunc("/submit", submit)
 	http.HandleFunc("/get", get)
 	http.ListenAndServe(*addr, nil)
@@ -72,19 +77,20 @@ func main() {
 func submit(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	defer req.Body.Close()
-	prog, err := ioutil.ReadAll(req.Body)
+	bits, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("reading request body: %s", err), http.StatusInternalServerError)
 		return
 	}
-	vm, err := txvm.Validate(prog, 3, math.MaxInt64)
+
+	var rawTx bc.RawTx
+	err = proto.Unmarshal(bits, &rawTx)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("validating tx: %s", err), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("parsing request body: %s", err), http.StatusBadRequest)
 		return
 	}
-	runlimit := math.MaxInt64 - vm.Runlimit()
-	tx, err := bc.NewTx(prog, 3, runlimit)
+
+	tx, err := bc.NewTx(rawTx.Program, rawTx.Version, rawTx.Runlimit)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("building tx: %s", err), http.StatusBadRequest)
 		return
@@ -97,6 +103,7 @@ func submit(w http.ResponseWriter, req *http.Request) {
 		bb = protocol.NewBlockBuilder()
 		nextBlockTime := time.Now().Add(blockInterval)
 		log.Printf("starting new tx pool to commit at %s", nextBlockTime)
+
 		err := bb.Start(chain.State(), bc.Millis(nextBlockTime))
 		if err != nil {
 			http.Error(w, fmt.Sprintf("starting a new tx pool: %s", err), http.StatusInternalServerError)
@@ -114,6 +121,7 @@ func submit(w http.ResponseWriter, req *http.Request) {
 			if err != nil {
 				log.Fatal(errors.Wrap(err, "committing new block"))
 			}
+			log.Printf("committed block %d with %d transaction(s)", unsignedBlock.Height, len(unsignedBlock.Transactions))
 		})
 	}
 
