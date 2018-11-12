@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/chain/txvm/errors"
 	"github.com/chain/txvm/protocol"
 	"github.com/chain/txvm/protocol/bc"
+	"github.com/coreos/bbolt"
 	"github.com/golang/protobuf/proto"
 )
 
@@ -35,25 +35,25 @@ func main() {
 	ctx := context.Background()
 
 	var (
-		addr = flag.String("addr", "localhost:2423", "server listen address")
-		dir  = flag.String("dir", "", "root of block storage tree")
+		addr   = flag.String("addr", "localhost:2423", "server listen address")
+		dbfile = flag.String("db", "", "path to block storage db")
 	)
 
 	flag.Parse()
 
+	db, err := bbolt.Open(*dbfile, 0600, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	heights := make(chan uint64)
-	bs, err := newBlockStore(*dir, heights)
+	bs, err := newBlockStore(db, heights)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	initialBlock, err = bs.GetBlock(ctx, 1)
-	if os.IsNotExist(errors.Root(err)) {
-		initialBlock, err = protocol.NewInitialBlock(nil, 0, time.Now())
-		if err != nil {
-			log.Fatal("producing genesis block: ", err)
-		}
-	} else if err != nil {
+	if err != nil {
 		log.Fatal(err)
 	}
 
@@ -79,20 +79,20 @@ func submit(w http.ResponseWriter, req *http.Request) {
 
 	bits, err := ioutil.ReadAll(req.Body)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("reading request body: %s", err), http.StatusInternalServerError)
+		httpErrf(w, http.StatusInternalServerError, "reading request body: %s", err)
 		return
 	}
 
 	var rawTx bc.RawTx
 	err = proto.Unmarshal(bits, &rawTx)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("parsing request body: %s", err), http.StatusBadRequest)
+		httpErrf(w, http.StatusBadRequest, "parsing request body: %s", err)
 		return
 	}
 
 	tx, err := bc.NewTx(rawTx.Program, rawTx.Version, rawTx.Runlimit)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("building tx: %s", err), http.StatusBadRequest)
+		httpErrf(w, http.StatusBadRequest, "building tx: %s", err)
 		return
 	}
 
@@ -102,11 +102,19 @@ func submit(w http.ResponseWriter, req *http.Request) {
 	if bb == nil {
 		bb = protocol.NewBlockBuilder()
 		nextBlockTime := time.Now().Add(blockInterval)
-		log.Printf("starting new tx pool to commit at %s", nextBlockTime)
+
+		st := chain.State()
+		if st.Header == nil {
+			err = st.ApplyBlockHeader(initialBlock.BlockHeader)
+			if err != nil {
+				httpErrf(w, http.StatusInternalServerError, "initializing empty state: %s", err)
+				return
+			}
+		}
 
 		err := bb.Start(chain.State(), bc.Millis(nextBlockTime))
 		if err != nil {
-			http.Error(w, fmt.Sprintf("starting a new tx pool: %s", err), http.StatusInternalServerError)
+			httpErrf(w, http.StatusInternalServerError, "starting a new tx pool: %s", err)
 			return
 		}
 		time.AfterFunc(blockInterval, func() {
@@ -127,23 +135,22 @@ func submit(w http.ResponseWriter, req *http.Request) {
 
 	err = bb.AddTx(bc.NewCommitmentsTx(tx))
 	if err != nil {
-		http.Error(w, fmt.Sprintf("adding tx to pool: %s", err), http.StatusBadRequest)
+		httpErrf(w, http.StatusBadRequest, "adding tx to pool: %s", err)
 		return
 	}
-	log.Printf("adding tx %x to pool", tx.ID.Bytes())
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func get(w http.ResponseWriter, req *http.Request) {
 	wantStr := req.FormValue("height")
 	var (
-		want uint64
+		want uint64 = 1
 		err  error
 	)
 	if wantStr != "" {
 		want, err = strconv.ParseUint(wantStr, 10, 64)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("parsing height: %s", err), http.StatusBadRequest)
+			httpErrf(w, http.StatusBadRequest, "parsing height: %s", err)
 			return
 		}
 	}
@@ -159,7 +166,7 @@ func get(w http.ResponseWriter, req *http.Request) {
 		case <-waiter:
 			// ok
 		case <-ctx.Done():
-			http.Error(w, "timed out", http.StatusRequestTimeout)
+			httpErrf(w, http.StatusRequestTimeout, "timed out")
 			return
 		}
 	}
@@ -168,19 +175,25 @@ func get(w http.ResponseWriter, req *http.Request) {
 
 	b, err := chain.GetBlock(ctx, want)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("getting block %d: %s", want, err), http.StatusInternalServerError)
+		httpErrf(w, http.StatusInternalServerError, "getting block %d: %s", want, err)
 		return
 	}
 
 	bits, err := b.Bytes()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("serializing block %d: %s", want, err), http.StatusInternalServerError)
+		httpErrf(w, http.StatusInternalServerError, "serializing block %d: %s", want, err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	_, err = w.Write(bits)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("sending response: %s", err), http.StatusInternalServerError)
+		httpErrf(w, http.StatusInternalServerError, "sending response: %s", err)
+		return
 	}
+}
+
+func httpErrf(w http.ResponseWriter, code int, msgfmt string, args ...interface{}) {
+	http.Error(w, fmt.Sprintf(msgfmt, args...), code)
+	log.Printf(msgfmt, args...)
 }
