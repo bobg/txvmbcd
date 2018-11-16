@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -67,11 +68,17 @@ func main() {
 	}
 
 	initialBlockID := initialBlock.Hash()
-	log.Printf("listening on %s, initial block ID %x", *addr, initialBlockID.Bytes())
+
+	listener, err := net.Listen("tcp", *addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("listening on %s, initial block ID %x", listener.Addr(), initialBlockID.Bytes())
 
 	http.HandleFunc("/submit", submit)
 	http.HandleFunc("/get", get)
-	http.ListenAndServe(*addr, nil)
+	http.Serve(listener, nil)
 }
 
 func submit(w http.ResponseWriter, req *http.Request) {
@@ -117,6 +124,7 @@ func submit(w http.ResponseWriter, req *http.Request) {
 			httpErrf(w, http.StatusInternalServerError, "starting a new tx pool: %s", err)
 			return
 		}
+		log.Printf("starting new block, will commit at %s", nextBlockTime)
 		time.AfterFunc(blockInterval, func() {
 			bbmu.Lock()
 			defer bbmu.Unlock()
@@ -138,6 +146,7 @@ func submit(w http.ResponseWriter, req *http.Request) {
 		httpErrf(w, http.StatusBadRequest, "adding tx to pool: %s", err)
 		return
 	}
+	log.Printf("added tx %x to the pending block", tx.ID.Bytes())
 	w.WriteHeader(http.StatusNoContent)
 }
 
