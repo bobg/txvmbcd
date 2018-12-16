@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/chain/txvm/crypto/ed25519"
+	"github.com/chain/txvm/errors"
 	"github.com/chain/txvm/protocol"
 	"github.com/chain/txvm/protocol/bc"
 	"github.com/chain/txvm/protocol/txbuilder"
@@ -22,8 +23,6 @@ import (
 	"github.com/coreos/bbolt"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/golang/protobuf/proto"
-
-	"i10r.io/errors"
 )
 
 func TestServer(t *testing.T) {

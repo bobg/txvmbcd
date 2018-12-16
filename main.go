@@ -138,6 +138,8 @@ func submit(w http.ResponseWriter, req *http.Request) {
 				log.Fatal(errors.Wrap(err, "committing new block"))
 			}
 			log.Printf("committed block %d with %d transaction(s)", unsignedBlock.Height, len(unsignedBlock.Transactions))
+
+			bb = nil
 		})
 	}
 
