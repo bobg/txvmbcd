@@ -48,6 +48,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer db.Close()
 
 	heights := make(chan uint64)
 	bs, err := newBlockStore(db, heights)
