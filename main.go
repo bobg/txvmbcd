@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -16,8 +17,9 @@ import (
 	"github.com/chain/txvm/errors"
 	"github.com/chain/txvm/protocol"
 	"github.com/chain/txvm/protocol/bc"
-	"github.com/coreos/bbolt"
 	"github.com/golang/protobuf/proto"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 var (
@@ -42,7 +44,7 @@ func main() {
 
 	flag.Parse()
 
-	db, err := bbolt.Open(*dbfile, 0600, nil)
+	db, err := sql.Open("sqlite3", *dbfile)
 	if err != nil {
 		log.Fatal(err)
 	}

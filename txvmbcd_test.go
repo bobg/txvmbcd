@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
@@ -20,9 +21,9 @@ import (
 	"github.com/chain/txvm/protocol/bc"
 	"github.com/chain/txvm/protocol/txbuilder"
 	"github.com/chain/txvm/protocol/txbuilder/standard"
-	"github.com/coreos/bbolt"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/golang/protobuf/proto"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestServer(t *testing.T) {
@@ -36,7 +37,7 @@ func TestServer(t *testing.T) {
 	f.Close()
 	defer os.Remove(tmpfile)
 
-	db, err := bbolt.Open(tmpfile, 0600, nil)
+	db, err := sql.Open("sqlite3", tmpfile)
 	if err != nil {
 		t.Fatal(err)
 	}
