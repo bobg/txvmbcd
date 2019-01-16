@@ -132,17 +132,21 @@ func submit(w http.ResponseWriter, req *http.Request) {
 			bbmu.Lock()
 			defer bbmu.Unlock()
 
+			defer func() { bb = nil }()
+
 			unsignedBlock, newSnapshot, err := bb.Build()
 			if err != nil {
 				log.Fatal(errors.Wrap(err, "building new block"))
+			}
+			if len(unsignedBlock.Transactions) == 0 {
+				log.Print("skipping commit of empty block")
+				return
 			}
 			err = chain.CommitAppliedBlock(ctx, &bc.Block{UnsignedBlock: unsignedBlock}, newSnapshot)
 			if err != nil {
 				log.Fatal(errors.Wrap(err, "committing new block"))
 			}
 			log.Printf("committed block %d with %d transaction(s)", unsignedBlock.Height, len(unsignedBlock.Transactions))
-
-			bb = nil
 		})
 	}
 
