@@ -34,7 +34,7 @@ func newBlockStore(db *sql.DB, heights chan<- uint64) (*blockStore, error) {
 		if err != nil {
 			return nil, errors.Wrap(err, "marshaling genesis block for writing to db")
 		}
-		_, err = db.Exec("INSERT OR IGNORE INTO blocks (height, hash, bits) VALUES (1, $1, $2)", h, bits)
+		_, err = db.Exec("INSERT OR IGNORE INTO blocks (height, hash, bits) VALUES (1, ?1, ?2)", h, bits)
 		if err != nil {
 			return nil, errors.Wrap(err, "writing genesis block to db")
 		}
@@ -55,7 +55,7 @@ func (s *blockStore) Height(context.Context) (uint64, error) {
 
 func (s *blockStore) GetBlock(_ context.Context, height uint64) (*bc.Block, error) {
 	var bits []byte
-	err := s.db.QueryRow("SELECT bits FROM blocks WHERE height = $1", height).Scan(&bits)
+	err := s.db.QueryRow("SELECT bits FROM blocks WHERE height = ?1", height).Scan(&bits)
 	if err != nil {
 		return nil, errors.Wrapf(err, "reading block %d from db", height)
 	}
@@ -84,7 +84,7 @@ func (s *blockStore) SaveBlock(_ context.Context, b *bc.Block) error {
 	if err != nil {
 		return errors.Wrapf(err, "marshaling block %d for writing to db", b.Height)
 	}
-	_, err = s.db.Exec("INSERT OR IGNORE INTO blocks (height, hash, bits) VALUES ($1, $2, $3)", b.Height, h, bits)
+	_, err = s.db.Exec("INSERT OR IGNORE INTO blocks (height, hash, bits) VALUES (?1, ?2, ?3)", b.Height, h, bits)
 	return errors.Wrapf(err, "writing block %d to db", b.Height)
 }
 
@@ -98,7 +98,7 @@ func (s *blockStore) SaveSnapshot(_ context.Context, snapshot *state.Snapshot) e
 	if err != nil {
 		return errors.Wrapf(err, "marshaling snapshot at height %d for writing to db", snapshot.Height())
 	}
-	_, err = s.db.Exec("INSERT OR IGNORE INTO snapshots (height, bits) VALUES ($1, $2)", snapshot.Height(), bits)
+	_, err = s.db.Exec("INSERT OR IGNORE INTO snapshots (height, bits) VALUES (?1, ?2)", snapshot.Height(), bits)
 	return errors.Wrapf(err, "writing snapshot at height %d to db", snapshot.Height())
 }
 
